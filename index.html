@@ -1,0 +1,1593 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Timestream</title>
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    
+    <script src="https://cdn.tailwindcss.com/3.4.1"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        slate: { 850: '#1e293b', 900: '#0f172a' },
+                        brand: { 50: '#f0f9ff', 100: '#e0f2fe', 200: '#bae6fd', 300: '#7dd3fc', 400: '#38bdf8', 500: '#0ea5e9', 600: '#0284c7', 700: '#0369a1', 800: '#075985', 900: '#0c4a6e' }
+                    },
+                    fontFamily: {
+                        sans: ['"Plus Jakarta Sans"', 'Inter', 'system-ui', 'sans-serif'],
+                        serif: ['Lora', 'Merriweather', 'Georgia', 'serif'],
+                    }
+                }
+            }
+        }
+    </script>
+
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Lora:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500;1,600;1,700&display=swap" rel="stylesheet">
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.4.4/lz-string.min.js"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <style type="text/tailwindcss">
+        @layer components {
+            .btn { @apply px-4 py-2 rounded-lg font-bold transition-all active:scale-95; }
+            .btn-primary { @apply bg-brand-600 text-white hover:bg-[#0369a1] shadow-md hover:shadow-lg; }
+            .btn-secondary { @apply bg-white text-slate-700 border border-slate-200 hover:bg-slate-50; }
+            .input-field { @apply w-full px-4 py-2 rounded-lg border border-slate-200 focus:border-brand-500 focus:ring-2 focus:ring-brand-200 outline-none transition; }
+            .card { @apply bg-white rounded-xl shadow-sm border border-slate-100; }
+        }
+        /* Hide scrollbar for cleaner UI in some panels */
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fade-in {
+            animation: fadeIn 0.3s ease-out forwards;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 font-sans antialiased selection:bg-brand-100 selection:text-brand-900">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useMemo } = React;
+
+        // --- CONSTANTS & HELPERS ---
+        const APP_VERSION = 2;
+        const APP_NAME = 'timestream';
+        const INDEX_KEY = `${APP_NAME}_index_v${APP_VERSION}`;
+        const PROJECT_PREFIX = `${APP_NAME}_project_v${APP_VERSION}_`;
+        const LAST_BACKUP_KEY = `${APP_NAME}_last_backup_v${APP_VERSION}`;
+        
+        const generateId = () => Math.random().toString(36).substr(2, 9);
+
+        // SVG Icons (Micro-library to replace FontAwesome)
+        const Icons = {
+            Stream: () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none" stroke="currentColor" strokeWidth="10" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5"><path d="M10 50 C 30 20, 50 80, 90 50" /><path d="M10 70 C 30 40, 50 100, 90 70" opacity="0.6"/><circle cx="50" cy="50" r="45" strokeWidth="5" /></svg>,
+            Plus: () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><path d="M5 12h14M12 5v14"/></svg>,
+            Trash: () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>,
+            Edit: () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>,
+            Eye: () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>,
+            Share: () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>,
+            Home: () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>,
+            Check: () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><polyline points="20 6 9 17 4 12"/></svg>,
+            Search: () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>,
+            Cog: () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>,
+            Info: () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>,
+            ArrowRight: () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>,
+            Database: () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>,
+            Wind: () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6"><path d="M9.59 4.59A2 2 0 1 1 11 8H2m10.59 11.41A2 2 0 1 0 14 16H2m15.73-8.27A2.5 2.5 0 1 1 19.5 12H2"/></svg>,
+            List: () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>,
+            Grid: () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>,
+            PlusCircle: () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-8 h-8"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>,
+            Download: () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>,
+            Upload: () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>,
+            Copy: () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>,
+            X: () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>,
+            Warning: () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>,
+            Pencil: () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>,
+            Settings: () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>,
+            ChevronUp: () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5"><polyline points="18 15 12 9 6 15"/></svg>,
+            ChevronDown: () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5"><polyline points="6 9 12 15 18 9"/></svg>,
+            Question: () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>,
+            LayoutVertical: () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5"><line x1="12" y1="3" x2="12" y2="21"/><circle cx="12" cy="12" r="3"/></svg>,
+            LayoutHorizontal: () => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5"><line x1="3" y1="12" x2="21" y2="12"/><circle cx="12" cy="12" r="3"/></svg>,
+        };
+        
+        // Safety check for Base64 images to prevent URL crashes
+        const isBase64 = (str) => {
+            if (!str) return false;
+            return str.startsWith('data:image') && str.length > 500;
+        };
+
+        const EmptyEvent = {
+            id: null,
+            title: '',
+            date: new Date().toISOString().split('T')[0], // For sorting
+            displayDate: '', // For UI (e.g. "Circa 1900")
+            description: '',
+            imageUrl: '',
+            tags: '' 
+        };
+
+        // --- DATA LAYER ---
+        const DataManager = {
+            getIndex: () => {
+                const raw = localStorage.getItem(INDEX_KEY);
+                return raw ? JSON.parse(raw) : [];
+            },
+            saveIndex: (index) => {
+                localStorage.setItem(INDEX_KEY, JSON.stringify(index));
+            },
+            getProject: (id) => {
+                const raw = localStorage.getItem(PROJECT_PREFIX + id);
+                return raw ? JSON.parse(raw) : null;
+            },
+            saveProject: (project) => {
+                localStorage.setItem(PROJECT_PREFIX + project.id, JSON.stringify(project));
+
+                // Update index
+                const index = DataManager.getIndex();
+                const meta = { id: project.id, title: project.title, lastModified: Date.now(), eventCount: project.events.length };
+                const existingIdx = index.findIndex(p => p.id === project.id);
+
+                if (existingIdx >= 0) {
+                    index[existingIdx] = meta;
+                } else {
+                    index.push(meta);
+                }
+                DataManager.saveIndex(index);
+            },
+            deleteProject: (id) => {
+                localStorage.removeItem(PROJECT_PREFIX + id);
+                const index = DataManager.getIndex().filter(p => p.id !== id);
+                DataManager.saveIndex(index);
+            },
+            createProject: (title = "Untitled Project") => {
+                const id = generateId();
+                const newProject = {
+                    id,
+                    version: APP_VERSION,
+                    title,
+                    author: '',
+                    events: [],
+                    theme: {
+                        primaryColor: 'teal',
+                        font: 'serif',
+                        background: 'slate'
+                    }
+                };
+                DataManager.saveProject(newProject);
+                return newProject;
+            }
+        };
+
+        // --- COMPONENTS ---
+
+        // 0. WELCOME MODAL
+        const Modal = ({ children, onClose }) => (
+            <div className="fixed inset-0 z-[100] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
+                <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-8 relative overflow-hidden" onClick={e => e.stopPropagation()}>
+                    {children}
+                </div>
+            </div>
+        );
+
+        const RenameModal = ({ onRename, onCancel, currentTitle }) => {
+            const [newTitle, setNewTitle] = useState(currentTitle);
+
+            return (
+                <Modal onClose={onCancel}>
+                    <h2 className="text-2xl font-bold text-slate-800 mb-4">Rename Project</h2>
+                    <input
+                        type="text"
+                        value={newTitle}
+                        onChange={e => setNewTitle(e.target.value)}
+                        onKeyDown={e => {
+                            if (e.key === 'Enter') onRename(newTitle);
+                        }}
+                        className="input-field mb-4"
+                        autoFocus
+                    />
+                    <div className="flex gap-4">
+                        <button onClick={onCancel} className="btn btn-secondary flex-1">Cancel</button>
+                        <button onClick={() => onRename(newTitle)} className="btn btn-primary flex-1">Rename</button>
+                    </div>
+                </Modal>
+            );
+        };
+
+        const ConfirmModal = ({ isOpen, title, message, onConfirm, onCancel, confirmText = "Delete", confirmColor = "bg-red-600 hover:bg-red-700" }) => {
+            if (!isOpen) return null;
+            return (
+                <Modal onClose={onCancel}>
+                    <h2 className="text-2xl font-bold text-slate-800 mb-4">{title}</h2>
+                    <p className="text-slate-600 mb-8">{message}</p>
+                    <div className="flex gap-4">
+                        <button onClick={onCancel} className="btn btn-secondary flex-1">Cancel</button>
+                        <button onClick={onConfirm} className={`btn text-white flex-1 ${confirmColor}`}>{confirmText}</button>
+                    </div>
+                </Modal>
+            );
+        };
+
+        const ShareSuccessModal = ({ onClose, url }) => (
+            <Modal onClose={onClose}>
+                <div className="flex justify-center mb-6">
+                    <div className="bg-green-100 text-green-600 w-16 h-16 rounded-2xl flex items-center justify-center text-3xl shadow-inner">
+                        <Icons.Check />
+                    </div>
+                </div>
+                <h2 className="text-2xl font-black text-center text-slate-900 mb-2">Link Ready!</h2>
+                <p className="text-center text-slate-500 mb-6">The link has been copied to your clipboard.</p>
+
+                <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 mb-6 overflow-hidden">
+                    <p className="text-xs text-slate-400 font-mono break-all line-clamp-3">{url}</p>
+                </div>
+
+                <button onClick={onClose} className="btn btn-primary w-full py-3 flex items-center justify-center gap-2">
+                    Okay, thanks
+                </button>
+            </Modal>
+        );
+
+        const SharedIntroModal = ({ onClose }) => (
+            <div className="fixed inset-0 z-[100] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
+                <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-8 relative overflow-hidden">
+                    <div className="absolute top-0 left-0 w-full h-2 bg-brand-500"></div>
+                    <div className="flex justify-center mb-6">
+                        <div className="bg-brand-100 text-brand-600 w-16 h-16 rounded-2xl flex items-center justify-center text-3xl shadow-inner">
+                            <Icons.Share />
+                        </div>
+                    </div>
+                    <h2 className="text-2xl font-black text-center text-slate-900 mb-2">Shared Project</h2>
+                    <p className="text-center text-slate-500 mb-8">
+                        You are viewing a shared timeline.
+                    </p>
+
+                    <div className="space-y-4 mb-8">
+                        <div className="flex gap-4">
+                            <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 flex-shrink-0"><Icons.Eye /></div>
+                            <div>
+                                <h4 className="font-bold text-slate-800 text-sm">View Mode</h4>
+                                <p className="text-sm text-slate-500 leading-relaxed">You can explore this timeline, but you cannot edit it directly.</p>
+                            </div>
+                        </div>
+                        <div className="flex gap-4">
+                            <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 flex-shrink-0"><Icons.Database /></div>
+                            <div>
+                                <h4 className="font-bold text-slate-800 text-sm">Local Storage</h4>
+                                <p className="text-sm text-slate-500 leading-relaxed">To save this project and make changes, click "Copy Project". It will be saved to your browser's local storage.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <button onClick={onClose} className="btn btn-primary w-full py-3 text-lg shadow-brand-200 flex items-center justify-center gap-2">
+                        View Timeline
+                    </button>
+                </div>
+            </div>
+        );
+
+        const WelcomeModal = ({ onClose }) => (
+            <div className="fixed inset-0 z-[100] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
+                <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-8 relative overflow-hidden">
+                    <div className="absolute top-0 left-0 w-full h-2 bg-brand-500"></div>
+                    <div className="flex justify-center mb-6">
+                        <div className="bg-brand-100 text-brand-600 w-16 h-16 rounded-2xl flex items-center justify-center text-3xl shadow-inner">
+                            <Icons.Stream />
+                        </div>
+                    </div>
+                    <h2 className="text-2xl font-black text-center text-slate-900 mb-2">Welcome to Timestream</h2>
+                    <p className="text-center text-slate-500 mb-8">The modern way to weave history into stories.</p>
+
+                    <div className="space-y-4 mb-8">
+                        <div className="flex gap-4">
+                            <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 flex-shrink-0"><Icons.Database /></div>
+                            <div>
+                                <h4 className="font-bold text-slate-800 text-sm">Local Storage Only</h4>
+                                <p className="text-sm text-slate-500 leading-relaxed">Your data is saved directly in your browser. We don't see your projects, but clearing your cache will delete them.</p>
+                            </div>
+                        </div>
+                        <div className="flex gap-4">
+                            <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 flex-shrink-0"><Icons.Share /></div>
+                            <div>
+                                <h4 className="font-bold text-slate-800 text-sm">Share via URL</h4>
+                                <p className="text-sm text-slate-500 leading-relaxed">Share projects instantly. The entire timeline is compressed into the link itself.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <button onClick={onClose} className="btn btn-primary w-full py-3 text-lg shadow-brand-200 flex items-center justify-center gap-2">
+                        Get Started <Icons.ArrowRight />
+                    </button>
+                </div>
+            </div>
+        );
+
+        // 1. HEADER
+        const Header = ({ mode, setMode, onShare, title, goHome, onRename, saveStatus, isSharedProject, onCopy }) => {
+            const [isMenuOpen, setIsMenuOpen] = useState(false);
+
+            return (
+                <header className="bg-white border-b border-slate-200 sticky top-0 z-50 shadow-sm backdrop-blur-md bg-white/90">
+                    <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                            <div className="flex items-center gap-3 cursor-pointer" onClick={goHome}>
+                                <div className="bg-brand-500 text-white w-8 h-8 rounded-lg flex items-center justify-center font-black shadow-brand-200">
+                                    <Icons.Stream />
+                                </div>
+                                <h1 className="font-black text-xl tracking-tight text-slate-800 hidden sm:block">Timestream</h1>
+                            </div>
+                            {title && <span className="text-slate-300 mx-2 hidden sm:inline">|</span>}
+                            <div className="flex items-center gap-2">
+                                {title && <span className="font-bold text-slate-600 truncate max-w-[150px] sm:max-w-xs">{title}</span>}
+                                {mode === 'edit' && title && (
+                                    <button onClick={onRename} aria-label="Rename Project" className="text-slate-400 hover:text-brand-600 transition p-1">
+                                        <Icons.Pencil />
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+
+                        <div className="flex gap-2 items-center">
+                            {/* Saving Indicator */}
+                            {saveStatus === 'saving' && (
+                                <div className="hidden sm:flex items-center gap-2 mr-2">
+                                    <div className="w-2 h-2 bg-brand-500 rounded-full animate-pulse"></div>
+                                    <span className="text-sm font-bold text-slate-400">Saving...</span>
+                                </div>
+                            )}
+
+                            {/* Mobile Menu Button */}
+                            <button
+                                onClick={() => setIsMenuOpen(!isMenuOpen)}
+                                className="md:hidden p-2 text-slate-600 hover:bg-slate-100 rounded-lg"
+                                aria-label="Toggle menu"
+                            >
+                                <Icons.List />
+                            </button>
+
+                            {/* Desktop Buttons */}
+                            <div className="hidden md:flex gap-2 items-center">
+                                {mode === 'edit' ? (
+                                    <>
+                                        <button onClick={goHome} className="btn btn-secondary text-sm flex items-center gap-2" title="Back to Dashboard">
+                                            <Icons.Home /> Dashboard
+                                        </button>
+                                        <button onClick={() => setMode('view')} className="btn btn-secondary text-sm flex items-center gap-2">
+                                            <Icons.Eye /> Preview
+                                        </button>
+                                        <button onClick={onShare} className="btn btn-primary text-sm flex items-center gap-2">
+                                            <Icons.Share /> Share
+                                        </button>
+                                    </>
+                                ) : (
+                                    <>
+                                        {isSharedProject ? (
+                                             <button onClick={onCopy} className="btn btn-primary text-sm flex items-center gap-2">
+                                                <Icons.Copy /> Copy Project
+                                            </button>
+                                        ) : (
+                                            <button onClick={() => setMode('edit')} className="btn btn-primary text-sm flex items-center gap-2">
+                                                <Icons.Edit /> Edit Project
+                                            </button>
+                                        )}
+                                    </>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Mobile Menu Dropdown */}
+                    {isMenuOpen && (
+                        <div className="md:hidden border-t border-slate-100 bg-white p-4 flex flex-col gap-2 shadow-lg absolute w-full left-0 top-16 animate-fade-in">
+                            {mode === 'edit' ? (
+                                <>
+                                    <button onClick={() => { setIsMenuOpen(false); goHome(); }} className="btn btn-secondary text-sm flex items-center gap-2 justify-center">
+                                        <Icons.Home /> Dashboard
+                                    </button>
+                                    <button onClick={() => { setIsMenuOpen(false); setMode('view'); }} className="btn btn-secondary text-sm flex items-center gap-2 justify-center">
+                                        <Icons.Eye /> Preview
+                                    </button>
+                                    <button onClick={() => { setIsMenuOpen(false); onShare(); }} className="btn btn-primary text-sm flex items-center gap-2 justify-center">
+                                        <Icons.Share /> Share
+                                    </button>
+                                </>
+                            ) : (
+                                <>
+                                    {isSharedProject ? (
+                                         <button onClick={() => { setIsMenuOpen(false); onCopy(); }} className="btn btn-primary text-sm flex items-center gap-2 justify-center">
+                                            <Icons.Copy /> Copy Project
+                                        </button>
+                                    ) : (
+                                        <button onClick={() => { setIsMenuOpen(false); setMode('edit'); }} className="btn btn-primary text-sm flex items-center gap-2 justify-center">
+                                            <Icons.Edit /> Edit Project
+                                        </button>
+                                    )}
+                                </>
+                            )}
+                        </div>
+                    )}
+                </header>
+            );
+        };
+
+        // 1.4 INTRO SECTION
+        const AboutModal = ({ onClose }) => (
+            <Modal onClose={onClose}>
+                <div className="flex justify-center mb-6">
+                    <div className="bg-brand-100 text-brand-600 w-16 h-16 rounded-2xl flex items-center justify-center text-3xl shadow-inner">
+                        <Icons.Question />
+                    </div>
+                </div>
+                <h2 className="text-2xl font-black text-center text-slate-900 mb-2">What is Timestream?</h2>
+                <p className="text-center text-slate-600 mb-8 leading-relaxed">
+                    Timestream is a tool for weaving history into stories. It allows you to create beautiful, interactive timelines for historical events, stories, or project roadmaps.
+                </p>
+
+                <div className="space-y-4 mb-8">
+                    <div className="flex gap-4">
+                        <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 flex-shrink-0"><Icons.Database /></div>
+                        <div>
+                            <h4 className="font-bold text-slate-800 text-sm">Local & Private</h4>
+                            <p className="text-sm text-slate-500 leading-relaxed">Your data is stored entirely in your browser's local storage. Nothing is sent to a server. <strong>Warning:</strong> Clearing your browser cache will delete your projects.</p>
+                        </div>
+                    </div>
+                    <div className="flex gap-4">
+                        <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 flex-shrink-0"><Icons.Share /></div>
+                        <div>
+                            <h4 className="font-bold text-slate-800 text-sm">Easy Sharing</h4>
+                            <p className="text-sm text-slate-500 leading-relaxed">Share your timelines via a generated URL. The entire project data is compressed into the link itself, so no account is needed for you or your viewers.</p>
+                        </div>
+                    </div>
+                    <div className="flex gap-4">
+                        <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 flex-shrink-0"><Icons.Check /></div>
+                        <div>
+                            <h4 className="font-bold text-slate-800 text-sm">Getting Started</h4>
+                            <p className="text-sm text-slate-500 leading-relaxed">Click "New Project" to begin. Add events with dates, descriptions, and images. Switch to "Preview" mode to see your timeline come to life.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <button onClick={onClose} className="btn btn-primary w-full py-3 text-lg flex items-center justify-center gap-2">
+                    Got it
+                </button>
+            </Modal>
+        );
+
+        // 1.5 DASHBOARD
+        const Dashboard = ({ projects, onSelectProject, onCreateProject, onDeleteProject, onRenameProject, setMode, daysSinceLastBackup, onExportData }) => {
+            const [deleteId, setDeleteId] = useState(null);
+            const [showDeleteModal, setShowDeleteModal] = useState(false);
+
+            const handleDelete = (e, id) => {
+                e.stopPropagation();
+                setDeleteId(id);
+                setShowDeleteModal(true);
+            };
+
+            const confirmDelete = () => {
+                if (deleteId) {
+                    onDeleteProject(deleteId);
+                }
+                setShowDeleteModal(false);
+                setDeleteId(null);
+            };
+
+            return (
+                <div className="max-w-5xl mx-auto px-6 py-12">
+                        <ConfirmModal
+                            isOpen={showDeleteModal}
+                            title="Delete Project"
+                            message="Are you sure you want to delete this project? This cannot be undone."
+                            onConfirm={confirmDelete}
+                            onCancel={() => setShowDeleteModal(false)}
+                        />
+
+                        {daysSinceLastBackup > 7 && (
+                            <div className="bg-orange-50 border border-orange-200 rounded-xl p-4 mb-8 flex items-center justify-between animate-fade-in">
+                                <div className="flex items-center gap-3">
+                                    <div className="text-orange-500"><Icons.Warning /></div>
+                                    <div>
+                                        <h3 className="font-bold text-orange-800">Backup Recommended</h3>
+                                        <p className="text-sm text-orange-600">You haven't exported your data in over a week.</p>
+                                    </div>
+                                </div>
+                                <button onClick={onExportData} className="btn bg-orange-100 text-orange-700 hover:bg-orange-200 border-transparent flex items-center gap-2">
+                                    <Icons.Download /> Backup Now
+                                </button>
+                            </div>
+                        )}
+
+                        <div className="flex justify-between items-start mb-8">
+                            <div>
+                                <h1 className="text-4xl font-black text-slate-900 mb-2">My Projects</h1>
+                                <p className="text-slate-500">Manage and edit your timelines.</p>
+                            </div>
+                            <div className="flex gap-2">
+                                <button onClick={onCreateProject} className="btn btn-primary flex items-center gap-2">
+                                    <Icons.Plus /> New Project
+                                </button>
+                                <button onClick={() => setMode('settings')} aria-label="Settings" className="btn btn-secondary flex items-center gap-2 relative">
+                                    <Icons.Settings />
+                                    {daysSinceLastBackup > 7 && (
+                                        <div className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full border-2 border-white"></div>
+                                    )}
+                                </button>
+                            </div>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                            {projects.map(p => (
+                                <div
+                                    key={p.id}
+                                    role="button"
+                                    tabIndex={0}
+                                    onClick={() => onSelectProject(p.id)}
+                                    onKeyDown={(e) => { if(e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onSelectProject(p.id); } }}
+                                    aria-label={`Open project ${p.title}`}
+                                    className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 cursor-pointer hover:shadow-md hover:border-brand-200 transition group relative"
+                                >
+                                    <div className="flex justify-between items-start">
+                                        <h3 className="font-bold text-lg text-slate-800 mb-1 group-hover:text-brand-600 transition">{p.title}</h3>
+                                        <button onClick={(e) => { e.stopPropagation(); onRenameProject(p.id); }} aria-label={`Rename ${p.title}`} className="text-slate-400 hover:text-brand-600 transition p-1">
+                                            <Icons.Pencil />
+                                        </button>
+                                    </div>
+                                    <div className="text-sm text-slate-400 mb-4">
+                                        Last modified: {new Date(p.lastModified).toLocaleDateString()}
+                                    </div>
+                                    <div className="flex justify-between items-center mt-4 border-t border-slate-50 pt-4">
+                                        <span className="text-sm font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded-full">{p.eventCount || 0} Events</span>
+                                        <button onClick={(e) => handleDelete(e, p.id)} aria-label={`Delete ${p.title}`} className="text-slate-300 hover:text-red-500 transition px-2">
+                                            <Icons.Trash />
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+    
+                            {/* Create New Card (Placeholder style) */}
+                            <div
+                                role="button"
+                                tabIndex={0}
+                                onClick={onCreateProject}
+                                onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && onCreateProject()}
+                                aria-label="Create new project"
+                                className="border-2 border-dashed border-slate-200 rounded-xl p-6 flex flex-col items-center justify-center text-slate-400 cursor-pointer hover:border-brand-400 hover:text-brand-500 transition hover:bg-brand-50 min-h-[160px]"
+                            >
+                                <div className="text-3xl mb-2"><Icons.PlusCircle /></div>
+                                <span className="font-bold">Create New</span>
+                            </div>
+                        </div>
+                </div>
+            );
+        };
+                            
+                                    const Settings = ({ onDeleteAllProjects, onExportData, onImportData, lastBackup }) => {
+                                        const [showDeleteModal, setShowDeleteModal] = useState(false);
+
+                                        const daysSinceLastBackup = useMemo(() => {
+                                            if (!lastBackup) return null;
+                                            const diff = Date.now() - lastBackup;
+                                            return Math.floor(diff / (1000 * 60 * 60 * 24));
+                                        }, [lastBackup]);
+                            
+                                        return (
+                                            <div className="max-w-5xl mx-auto px-6 py-12">
+                                                <ConfirmModal
+                                                    isOpen={showDeleteModal}
+                                                    title="Delete All Data"
+                                                    message="Are you sure you want to delete ALL projects? This cannot be undone."
+                                                    onConfirm={() => {
+                                                        onDeleteAllProjects();
+                                                        setShowDeleteModal(false);
+                                                    }}
+                                                    onCancel={() => setShowDeleteModal(false)}
+                                                    confirmText="Delete All"
+                                                />
+                                                <div className="flex justify-between items-start mb-8">
+                                                    <div>
+                                                        <h1 className="text-4xl font-black text-slate-900 mb-2">Settings</h1>
+                                                        <p className="text-slate-500">Manage your application settings and data.</p>
+                                                    </div>
+                                                </div>
+                            
+                                                <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6">
+                                                    <h2 className="text-lg font-bold text-slate-800 mb-4">Data Management</h2>
+                                                <div className="flex flex-col md:flex-row flex-wrap gap-4 items-stretch md:items-center">
+                                                    <button onClick={onExportData} className="btn btn-secondary flex items-center justify-center gap-2">
+                                                            <Icons.Download /> Export Data
+                                                        </button>
+                                                        <input
+                                                            type="file"
+                                                            id="import-file"
+                                                            style={{ display: 'none' }}
+                                                            onChange={onImportData}
+                                                            accept="application/json"
+                                                        />
+                                                    <button onClick={() => document.getElementById('import-file').click()} className="btn btn-secondary flex items-center justify-center gap-2">
+                                                            <Icons.Upload /> Import Data
+                                                        </button>
+                                                    <button onClick={() => setShowDeleteModal(true)} className="btn bg-red-50 text-red-500 border border-red-100 hover:bg-red-100 flex items-center justify-center gap-2">
+                                                            <Icons.Warning /> Delete All Data
+                                                        </button>
+                                                        {daysSinceLastBackup !== null && (
+                                                        <div className={`text-sm text-center md:text-left ${daysSinceLastBackup > 7 ? 'text-red-500' : 'text-slate-500'}`}>
+                                                                Last backup: {daysSinceLastBackup} days ago
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    };
+        const EventModal = ({ event, onClose }) => {
+            if (!event) return null;
+            return (
+                <div className="fixed inset-0 z-[100] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-8 relative overflow-hidden" onClick={e => e.stopPropagation()}>
+                        <button onClick={onClose} aria-label="Close" className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 transition">
+                            <Icons.X />
+                        </button>
+                        {event.imageUrl && <img src={event.imageUrl} alt={event.title} className="w-full h-48 object-cover rounded-lg mb-4" />}
+                        <h2 className="text-2xl font-bold text-slate-800 mb-2">{event.title}</h2>
+                        <p className="text-sm text-slate-500 mb-4">{event.displayDate || event.date}</p>
+                        <p className="text-slate-600 whitespace-pre-wrap">{event.description}</p>
+                    </div>
+                </div>
+            );
+        };
+
+        const TimelineView = ({ project, displayMode = 'expanded', layoutMode = 'vertical' }) => {
+            const [selectedEvent, setSelectedEvent] = useState(null);
+            // Theme Lookups
+            const colors = {
+                teal: { text: 'text-teal-600', border: 'border-teal-500', bg: 'bg-teal-50', bubble: 'border-teal-500' },
+                blue: { text: 'text-blue-600', border: 'border-blue-500', bg: 'bg-blue-50', bubble: 'border-blue-500' },
+                indigo: { text: 'text-indigo-600', border: 'border-indigo-500', bg: 'bg-indigo-50', bubble: 'border-indigo-500' },
+                rose: { text: 'text-rose-600', border: 'border-rose-500', bg: 'bg-rose-50', bubble: 'border-rose-500' },
+                amber: { text: 'text-amber-600', border: 'border-amber-500', bg: 'bg-amber-50', bubble: 'border-amber-500' }
+            };
+            const fonts = {
+                serif: 'font-serif',
+                sans: 'font-sans',
+                mono: 'font-mono'
+            };
+            const backgrounds = {
+                slate: 'bg-slate-50',
+                white: 'bg-white',
+                paper: 'bg-orange-50'
+            };
+
+            const theme = project.theme || { primaryColor: 'teal', font: 'serif', background: 'slate' };
+            const themeColor = colors[theme.primaryColor] || colors.teal;
+            const themeFont = fonts[theme.font] || fonts.serif;
+            const themeBg = backgrounds[theme.background] || backgrounds.slate;
+
+            // Sort events chronologically
+            const sortedEvents = useMemo(() => {
+                return [...project.events].sort((a, b) => new Date(a.date) - new Date(b.date));
+            }, [project.events]);
+
+            if (sortedEvents.length === 0) {
+                return (
+                    <div className="flex flex-col items-center justify-center py-32 text-slate-400">
+                        <div className="text-6xl mb-4 text-slate-200"><Icons.Wind /></div>
+                        <p className="font-bold">This timeline is empty.</p>
+                    </div>
+                );
+            }
+
+            // Horizontal View Component
+            if (layoutMode === 'horizontal') {
+                return (
+                    <div className={`h-[calc(100vh-64px)] overflow-x-auto overflow-y-hidden ${themeBg}`}>
+                         <EventModal event={selectedEvent} onClose={() => setSelectedEvent(null)} />
+                         <div className="h-full flex flex-col justify-center min-w-max p-8">
+                             <div className="text-center mb-12 sticky left-0 right-0">
+                                <h1 className={`text-4xl font-black text-slate-900 mb-2 ${themeFont}`}>{project.title}</h1>
+                                <p className="text-slate-500 italic">By {project.author || 'Anonymous'}</p>
+                            </div>
+
+                            <div className="relative flex items-center pt-20 pb-32 px-16">
+                                {/* Horizontal Line */}
+                                <div className="absolute left-0 right-0 top-1/2 h-1 bg-slate-200 z-0"></div>
+
+                                <div className="flex gap-16 relative z-10">
+                                    {sortedEvents.map((evt, idx) => {
+                                        const isTop = idx % 2 === 0;
+                                        return (
+                                            <div
+                                                key={evt.id}
+                                                className={`w-80 flex flex-col items-center flex-shrink-0 group ${isTop ? 'flex-col-reverse -mb-24 translate-y-12' : 'mt-0 -translate-y-12'}`}
+                                            >
+                                                 {/* Dot */}
+                                                <div className={`w-4 h-4 bg-white border-4 ${themeColor.bubble} rounded-full shadow-sm z-20`}></div>
+
+                                                {/* Connector */}
+                                                <div className={`w-px h-12 bg-slate-200 ${isTop ? 'mb-2' : 'mt-2'}`}></div>
+
+                                                {/* Card */}
+                                                <div
+                                                    role="button"
+                                                    tabIndex={0}
+                                                    onClick={() => setSelectedEvent(evt)}
+                                                    onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && setSelectedEvent(evt)}
+                                                    aria-label={`View details for ${evt.title}`}
+                                                    className={`w-full bg-white border border-slate-100 rounded-2xl p-5 shadow-sm hover:shadow-xl transition-all duration-300 hover:scale-105 cursor-pointer ${displayMode === 'compact' ? 'py-3' : ''}`}
+                                                >
+                                                     <div className="flex items-baseline justify-between mb-2">
+                                                        <span className={`font-black ${themeColor.text} text-xs uppercase tracking-widest`}>
+                                                            {evt.displayDate || evt.date}
+                                                        </span>
+                                                     </div>
+                                                     <h3 className={`text-lg font-bold text-slate-800 mb-2 ${themeFont} leading-tight line-clamp-2`}>{evt.title}</h3>
+                                                     {displayMode === 'expanded' && evt.imageUrl && (
+                                                         <div className="mb-3 rounded-lg overflow-hidden bg-slate-50 border border-slate-100 aspect-video">
+                                                             <img src={evt.imageUrl} alt={evt.title} className="w-full h-full object-cover" loading="lazy" />
+                                                         </div>
+                                                     )}
+                                                     {displayMode === 'expanded' && (
+                                                        <p className="text-slate-600 text-xs line-clamp-3">{evt.description}</p>
+                                                     )}
+                                                </div>
+                                            </div>
+                                        )
+                                    })}
+                                </div>
+                            </div>
+                         </div>
+                    </div>
+                );
+            }
+
+            // Vertical View (Default)
+            return (
+                <div className={`min-h-full py-16 ${themeBg}`}>
+                    <EventModal event={selectedEvent} onClose={() => setSelectedEvent(null)} />
+                    <div className="max-w-4xl mx-auto px-4">
+                        <div className="text-center mb-16">
+                            <h1 className={`text-4xl md:text-5xl font-black text-slate-900 mb-4 ${themeFont}`}>{project.title}</h1>
+                            <p className="text-lg text-slate-500 italic">By {project.author || 'Anonymous'}</p>
+                        </div>
+
+                        <div className="relative">
+                            {/* The Vertical Line */}
+                            <div className="absolute left-4 md:left-1/2 top-0 bottom-0 w-1 bg-slate-200 transform md:-translate-x-1/2 rounded-full"></div>
+
+                            <div className="space-y-12">
+                                {sortedEvents.map((evt, idx) => {
+                                    const isLeft = idx % 2 === 0;
+                                    return (
+                                        <div
+                                            key={evt.id}
+                                            role="button"
+                                            tabIndex={0}
+                                            onClick={() => setSelectedEvent(evt)}
+                                            onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && setSelectedEvent(evt)}
+                                            aria-label={`View details for ${evt.title}`}
+                                            className={`relative flex flex-col md:flex-row gap-8 items-center md:items-start ${isLeft ? 'md:flex-row-reverse' : ''}`}
+                                        >
+
+                                            {/* Date Bubble (Center) */}
+                                            <div className={`absolute left-4 md:left-1/2 w-4 h-4 bg-white border-4 ${themeColor.bubble} rounded-full transform -translate-x-1/2 z-10 mt-6 shadow-sm`}></div>
+
+                                            {/* Empty Spacer for desktop layout balance */}
+                                            <div className="flex-1 hidden md:block"></div>
+
+                                            {/* Content Card */}
+                                            <div className="flex-1 w-full pl-12 md:pl-0">
+                                                <div className={`group relative bg-white border border-slate-100 rounded-2xl p-6 shadow-sm hover:shadow-xl transition-all duration-300 hover:-translate-y-1 ${displayMode === 'compact' ? 'py-4' : ''}`}>
+
+                                                    {/* Arrow pointing to line */}
+                                                    <div className={`absolute top-6 w-4 h-4 bg-white border-b border-l border-slate-100 transform rotate-45 hidden md:block
+                                                        ${isLeft ? '-right-2 border-r-0 border-t-0' : '-left-2 border-r-0 border-t-0' }`}>
+                                                    </div>
+
+                                                    <div className="flex items-baseline justify-between mb-2">
+                                        <span className={`font-black ${themeColor.text} text-sm uppercase tracking-widest`}>
+                                                            {evt.displayDate || evt.date}
+                                                        </span>
+                                                        {evt.tags && (
+                                            <span className="bg-slate-100 text-slate-500 text-xs px-2 py-1 rounded-full font-bold uppercase">{evt.tags}</span>
+                                                        )}
+                                                    </div>
+
+                                                    <h3 className={`text-xl font-bold text-slate-800 mb-2 ${themeFont} leading-tight`}>{evt.title}</h3>
+
+                                                    {displayMode === 'expanded' && (
+                                                        <div className="animate-fade-in">
+                                                            {evt.imageUrl && (
+                                                                <div className="mb-4 rounded-xl overflow-hidden bg-slate-50 border border-slate-100 aspect-video">
+                                                                    <img src={evt.imageUrl} alt={evt.title} className="w-full h-full object-cover transform group-hover:scale-105 transition-transform duration-700" loading="lazy" />
+                                                                </div>
+                                                            )}
+                                                            <p className="text-slate-600 leading-relaxed text-sm whitespace-pre-wrap">{evt.description}</p>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // 3. EDITOR DASHBOARD
+
+        const ImageHelpModal = ({ onClose, onUseUrl }) => {
+            const [driveId, setDriveId] = useState('');
+            const [generatedUrl, setGeneratedUrl] = useState('');
+
+            const generateDriveUrl = () => {
+                if (!driveId) return;
+                const url = `https://drive.usercontent.google.com/download?id=${driveId}`;
+                setGeneratedUrl(url);
+            };
+
+            const handleUse = () => {
+                if (generatedUrl) {
+                    onUseUrl(generatedUrl);
+                    onClose();
+                }
+            };
+
+            return (
+                <Modal onClose={onClose}>
+                    <h2 className="text-2xl font-bold text-slate-800 mb-6 flex items-center gap-2">
+                        <Icons.Info /> Image Upload Help
+                    </h2>
+
+                    <div className="space-y-6">
+                        {/* Unsplash Section */}
+                        <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                            <h3 className="font-bold text-slate-700 mb-2 flex items-center gap-2">
+                                <Icons.Search /> Unsplash Images
+                            </h3>
+                            <p className="text-sm text-slate-600 mb-2">Find an image on Unsplash, then:</p>
+                            <ol className="list-decimal list-inside text-sm text-slate-500 space-y-1 ml-1">
+                                <li>Right-click on the image.</li>
+                                <li>Select <strong>Copy Image Link</strong> (or Copy Image Address).</li>
+                                <li>Paste the link into the URL field.</li>
+                            </ol>
+                        </div>
+
+                        {/* Google Drive Section */}
+                        <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
+                            <h3 className="font-bold text-blue-800 mb-2 flex items-center gap-2">
+                                <Icons.Database /> Google Drive Images
+                            </h3>
+                            <p className="text-sm text-blue-700 mb-4">
+                                Hosting on Drive? Make sure your file is public:
+                            </p>
+                            <ol className="list-decimal list-inside text-sm text-blue-600 space-y-1 ml-1 mb-4">
+                                <li>Right-click file in Drive → <strong>Share</strong></li>
+                                <li>Set access to: <strong>Anyone with the link</strong></li>
+                                <li>Copy the link (e.g. <code>.../d/<b>FILE_ID</b>/view...</code>)</li>
+                                <li>Paste the <strong>FILE_ID</strong> below:</li>
+                            </ol>
+
+                            <div className="flex gap-2 mb-2">
+                                <input
+                                    value={driveId}
+                                    onChange={e => setDriveId(e.target.value)}
+                                    placeholder="Paste File ID here..."
+                                    className="input-field text-sm bg-white"
+                                />
+                                <button onClick={generateDriveUrl} className="btn btn-primary text-sm whitespace-nowrap">
+                                    Generate Link
+                                </button>
+                            </div>
+
+                            {generatedUrl && (
+                                <div className="animate-fade-in">
+                                    <div className="bg-white border border-blue-200 p-2 rounded text-xs font-mono text-slate-500 mb-2 break-all">
+                                        {generatedUrl}
+                                    </div>
+                                    <button onClick={handleUse} className="btn bg-blue-600 text-white w-full text-sm hover:bg-blue-700">
+                                        Use this URL
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </Modal>
+            );
+        };
+
+        const ThemeEditor = ({ theme, onChange }) => {
+            return (
+                <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl mb-6">
+                    <h3 className="font-bold text-sm text-slate-400 uppercase tracking-widest mb-4">Timeline Appearance</h3>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                        <div>
+                            <label className="block text-sm font-bold text-slate-600 mb-1">Primary Color</label>
+                            <select
+                                value={theme?.primaryColor || 'teal'}
+                                onChange={(e) => onChange({...theme, primaryColor: e.target.value})}
+                                className="input-field text-sm py-1"
+                            >
+                                <option value="teal">Teal</option>
+                                <option value="blue">Blue</option>
+                                <option value="indigo">Indigo</option>
+                                <option value="rose">Rose</option>
+                                <option value="amber">Amber</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label className="block text-sm font-bold text-slate-600 mb-1">Font Style</label>
+                            <select
+                                value={theme?.font || 'serif'}
+                                onChange={(e) => onChange({...theme, font: e.target.value})}
+                                className="input-field text-sm py-1"
+                            >
+                                <option value="serif">Serif (Classic)</option>
+                                <option value="sans">Sans (Modern)</option>
+                                <option value="mono">Mono (Technical)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label className="block text-sm font-bold text-slate-600 mb-1">Background</label>
+                            <select
+                                value={theme?.background || 'slate'}
+                                onChange={(e) => onChange({...theme, background: e.target.value})}
+                                className="input-field text-sm py-1"
+                            >
+                                <option value="slate">Light Slate</option>
+                                <option value="white">Clean White</option>
+                                <option value="paper">Warm Paper</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const Editor = ({ project, setProject }) => {
+            const [selectedId, setSelectedId] = useState(null);
+            const [activeEvent, setActiveEvent] = useState(EmptyEvent);
+            const [errors, setErrors] = useState({});
+            const [showSettings, setShowSettings] = useState(false);
+            const [showDeleteModal, setShowDeleteModal] = useState(false);
+            const [showImageHelp, setShowImageHelp] = useState(false);
+            const [deleteId, setDeleteId] = useState(null);
+
+            // Derived sorted list for the sidebar
+            const sortedPreview = useMemo(() => {
+                return [...project.events].sort((a, b) => new Date(a.date) - new Date(b.date));
+            }, [project.events]);
+
+            const handleSaveEvent = () => {
+                // Validation
+                if (!activeEvent.title.trim()) {
+                    setErrors({title: 'Title is required'});
+                    return;
+                }
+                if (isBase64(activeEvent.imageUrl)) {
+                    setErrors({image: 'Image link is too long! Use a direct URL (ending in .jpg/.png) instead of pasting image data.'});
+                    return;
+                }
+
+                const newEvent = { 
+                    ...activeEvent, 
+                    id: activeEvent.id || generateId(),
+                    displayDate: activeEvent.displayDate || activeEvent.date // Fallback
+                };
+
+                let newEvents;
+                if (activeEvent.id) {
+                    newEvents = project.events.map(e => e.id === activeEvent.id ? newEvent : e);
+                } else {
+                    newEvents = [...project.events, newEvent];
+                }
+
+                setProject({ ...project, events: newEvents });
+                resetForm();
+            };
+
+            const handleDelete = (id) => {
+                setDeleteId(id);
+                setShowDeleteModal(true);
+            };
+
+            const confirmDelete = () => {
+                if (deleteId) {
+                    setProject({ ...project, events: project.events.filter(e => e.id !== deleteId) });
+                    if (selectedId === deleteId) resetForm();
+                }
+                setShowDeleteModal(false);
+                setDeleteId(null);
+            };
+
+            const handleEdit = (evt) => {
+                setActiveEvent(evt);
+                setSelectedId(evt.id);
+                setErrors({});
+                setShowSettings(false);
+            };
+
+            const resetForm = () => {
+                setActiveEvent(EmptyEvent);
+                setSelectedId(null);
+                setErrors({});
+            };
+
+            const openUnsplash = () => {
+                const query = activeEvent.title || "history";
+                window.open(`https://unsplash.com/s/photos/${encodeURIComponent(query)}`, '_blank');
+            };
+
+            return (
+                <div className="max-w-7xl mx-auto p-4 md:p-6 h-[calc(100vh-64px)] overflow-hidden flex flex-col md:flex-row gap-6">
+                    <ConfirmModal
+                        isOpen={showDeleteModal}
+                        title="Delete Event"
+                        message="Are you sure you want to delete this event?"
+                        onConfirm={confirmDelete}
+                        onCancel={() => setShowDeleteModal(false)}
+                    />
+                    {showImageHelp && (
+                        <ImageHelpModal
+                            onClose={() => setShowImageHelp(false)}
+                            onUseUrl={(url) => setActiveEvent({...activeEvent, imageUrl: url})}
+                        />
+                    )}
+                    
+                    {/* Left Panel: Event List */}
+                    <div className="w-full md:w-1/3 flex flex-col bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden h-1/3 md:h-full flex-shrink-0">
+                        <div className="p-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
+                            <div className="flex items-center gap-2">
+                                <h2 className="font-bold text-slate-700">Events ({project.events.length})</h2>
+                                <button onClick={() => setShowSettings(!showSettings)} className="text-slate-400 hover:text-brand-600 transition" title="Project Settings" aria-label="Project Settings">
+                                    <Icons.Cog />
+                                </button>
+                            </div>
+                            <button onClick={resetForm} className="text-sm bg-brand-100 text-brand-700 px-2 py-1 rounded font-bold hover:bg-brand-200 transition flex items-center gap-1">
+                                <Icons.Plus /> Add
+                            </button>
+                        </div>
+                        <div className="overflow-y-auto flex-1 p-2 space-y-2">
+                            {sortedPreview.map(evt => (
+                                <div 
+                                    key={evt.id} 
+                                    role="button"
+                                    tabIndex={0}
+                                    onClick={() => handleEdit(evt)}
+                                    onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && handleEdit(evt)}
+                                    aria-label={`Edit event ${evt.title}`}
+                                    className={`p-3 rounded-xl border cursor-pointer transition-all ${selectedId === evt.id ? 'bg-brand-50 border-brand-500 ring-1 ring-brand-500' : 'bg-white border-slate-100 hover:border-slate-300'}`}
+                                >
+                                    <div className="flex justify-between items-start">
+                                        <div className="font-bold text-sm text-slate-800 line-clamp-1">{evt.title}</div>
+                                        <div className="text-xs font-mono text-slate-400">{evt.date}</div>
+                                    </div>
+                                    <div className="text-sm text-slate-500 mt-1 line-clamp-1">{evt.description || "No description..."}</div>
+                                </div>
+                            ))}
+                            {project.events.length === 0 && (
+                                <div className="text-center p-8 text-slate-400 text-sm">
+                                    No events yet.<br/>Click "Add" to start.
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Middle Panel: Editor Form */}
+                    <div className="flex-1 bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col overflow-y-auto">
+                        <div className="p-4 border-b border-slate-100 bg-slate-50">
+                            <h2 className="font-black text-slate-700 uppercase tracking-widest text-sm">
+                                {showSettings ? 'Project Settings' : (selectedId ? 'Editing Event' : 'New Event')}
+                            </h2>
+                        </div>
+                        
+                        <div className="p-6 space-y-6">
+
+                            {showSettings ? (
+                                <div className="animate-fade-in">
+                                    <div className="bg-amber-50 border border-amber-100 p-4 rounded-xl mb-6">
+                                        <label className="block text-sm font-bold text-amber-600 mb-1">PROJECT TITLE</label>
+                                        <input
+                                            value={project.title}
+                                            onChange={e => setProject({...project, title: e.target.value})}
+                                            className="w-full bg-transparent border-b border-amber-200 focus:border-amber-500 outline-none font-serif text-xl font-bold text-slate-800"
+                                            placeholder="Enter Project Title..."
+                                        />
+                                        <input
+                                            value={project.author}
+                                            onChange={e => setProject({...project, author: e.target.value})}
+                                            className="w-full bg-transparent border-b border-amber-200 focus:border-amber-500 outline-none text-sm mt-2 text-slate-600"
+                                            placeholder="Author Name"
+                                        />
+                                    </div>
+                                    <ThemeEditor theme={project.theme} onChange={(t) => setProject({...project, theme: t})} />
+                                    <div className="flex justify-end">
+                                        <button onClick={() => setShowSettings(false)} className="btn btn-primary">Done</button>
+                                    </div>
+                                </div>
+                            ) : (
+                                <>
+                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-sm font-bold text-slate-400 mb-1 uppercase">Sorting Date</label>
+                                            <input
+                                                type="date"
+                                                value={activeEvent.date}
+                                                onChange={e => setActiveEvent({...activeEvent, date: e.target.value})}
+                                                className="input-field font-mono"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-bold text-slate-400 mb-1 uppercase">Display Date (Optional)</label>
+                                            <input
+                                                type="text"
+                                                value={activeEvent.displayDate}
+                                                onChange={e => setActiveEvent({...activeEvent, displayDate: e.target.value})}
+                                                placeholder="e.g. Winter 1776"
+                                                className="input-field"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-sm font-bold text-slate-400 mb-1 uppercase">Event Title</label>
+                                        <input
+                                            value={activeEvent.title}
+                                            onChange={e => setActiveEvent({...activeEvent, title: e.target.value})}
+                                            placeholder="The Signing of the Declaration"
+                                            className={`input-field text-lg font-bold ${errors.title ? 'border-red-500' : ''}`}
+                                        />
+                                        {errors.title && <p className="text-red-500 text-sm mt-1">{errors.title}</p>}
+                                    </div>
+
+                                    <div>
+                                        <div className="flex justify-between items-end mb-1">
+                                            <label className="block text-sm font-bold text-slate-400 uppercase">Image URL</label>
+                                            <div className="flex gap-4">
+                                                <button onClick={() => setShowImageHelp(true)} className="text-xs font-bold text-slate-400 hover:text-brand-600 flex items-center gap-1">
+                                                    <Icons.Info /> Upload Help
+                                                </button>
+                                                <button onClick={openUnsplash} className="text-xs font-bold text-brand-600 hover:text-brand-700 flex items-center gap-1">
+                                                    <Icons.Search /> Find on Unsplash
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <div className="flex gap-2">
+                                            <input
+                                                value={activeEvent.imageUrl}
+                                                onChange={e => setActiveEvent({...activeEvent, imageUrl: e.target.value})}
+                                                placeholder="https://example.com/image.jpg"
+                                                className="input-field text-sm"
+                                            />
+                                            {activeEvent.imageUrl && !isBase64(activeEvent.imageUrl) && (
+                                                <div className="w-10 h-10 rounded border overflow-hidden flex-shrink-0">
+                                                    <img src={activeEvent.imageUrl} className="w-full h-full object-cover" onError={(e) => e.target.style.display='none'} />
+                                                </div>
+                                            )}
+                                        </div>
+                                        {errors.image && <p className="text-red-500 text-sm mt-1 font-bold">{errors.image}</p>}
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-sm font-bold text-slate-400 mb-1 uppercase">Description</label>
+                                        <textarea
+                                            value={activeEvent.description}
+                                            onChange={e => setActiveEvent({...activeEvent, description: e.target.value})}
+                                            placeholder="Explain the significance of this event..."
+                                            className="input-field min-h-[150px] resize-none leading-relaxed"
+                                        ></textarea>
+                                    </div>
+
+                                    <div className="pt-4 flex gap-3 border-t border-slate-100">
+                                        <button onClick={handleSaveEvent} className="btn btn-primary flex-1 flex items-center justify-center gap-2">
+                                            <Icons.Check /> {selectedId ? 'Update Event' : 'Add Event'}
+                                        </button>
+                                        {selectedId && (
+                                            <button onClick={() => handleDelete(selectedId)} aria-label="Delete Event" className="btn bg-red-50 text-red-500 border border-red-100 hover:bg-red-100">
+                                                <Icons.Trash />
+                                            </button>
+                                        )}
+                                    </div>
+                                </>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // 4. MAIN APP CONTAINER
+        const App = () => {
+            const [mode, setMode] = useState('dashboard'); // 'dashboard' | 'edit' | 'view'
+            const [displayMode, setDisplayMode] = useState('expanded');
+            const [layoutMode, setLayoutMode] = useState('vertical'); // 'vertical' | 'horizontal'
+            const [project, setProject] = useState(null);
+            const [isSharedProject, setIsSharedProject] = useState(false);
+            const [showWelcome, setShowWelcome] = useState(false);
+            const [showAbout, setShowAbout] = useState(false);
+            const [showSharedIntro, setShowSharedIntro] = useState(false);
+            const [projects, setProjects] = useState([]);
+            const [lastBackup, setLastBackup] = useState(null);
+
+            const [saveStatus, setSaveStatus] = useState('saved');
+
+            const [showShareModal, setShowShareModal] = useState(false);
+            const [showShareSuccess, setShowShareSuccess] = useState(false);
+            const [shareUrl, setShareUrl] = useState('');
+            const [showRenameModal, setShowRenameModal] = useState(false);
+            const [renameProjectId, setRenameProjectId] = useState(null);
+
+            const daysSinceLastBackup = useMemo(() => {
+                if (!lastBackup) return null;
+                const diff = Date.now() - lastBackup;
+                return Math.floor(diff / (1000 * 60 * 60 * 24));
+            }, [lastBackup]);
+
+            // Load from URL (Shared) on Start
+            useEffect(() => {
+                const params = new URLSearchParams(window.location.search);
+                const shareData = params.get('t');
+
+                if (shareData) {
+                    try {
+                        const json = LZString.decompressFromEncodedURIComponent(shareData);
+                        if (json) {
+                            const data = JSON.parse(json);
+                            setProject(data);
+                            setIsSharedProject(true);
+                            setShowSharedIntro(true);
+                            setMode('view');
+                        }
+                    } catch (e) {
+                        console.error("Failed to load shared timeline", e);
+                    }
+                } else if (DataManager.getIndex().length === 0) {
+                    setShowWelcome(true);
+                }
+                setProjects(DataManager.getIndex());
+                setLastBackup(localStorage.getItem(LAST_BACKUP_KEY));
+            }, []);
+
+            const closeWelcome = () => {
+                localStorage.setItem('timestream_welcome_seen', 'true');
+                setShowWelcome(false);
+            };
+
+            // Auto-save Project to LocalStorage
+            useEffect(() => {
+                if (mode === 'edit' && project) {
+                    setSaveStatus('saving');
+                    DataManager.saveProject(project);
+                    const timer = setTimeout(() => setSaveStatus('saved'), 800);
+                    return () => clearTimeout(timer);
+                }
+            }, [project, mode]);
+
+            const handleShare = () => {
+                if (!project) return;
+                const json = JSON.stringify(project);
+                const compressed = LZString.compressToEncodedURIComponent(json);
+                const url = `https://matthijsvanmierlo.github.io/timestream?t=${compressed}`;
+                
+                navigator.clipboard.writeText(url)
+                    .then(() => {
+                        setShareUrl(url);
+                        setShowShareSuccess(true);
+                    })
+                    .catch(err => {
+                        console.error("Clipboard failed", err);
+                        setShareUrl(url);
+                        setShowShareSuccess(true);
+                    });
+            };
+
+            const handleCreateProject = () => {
+                const newProj = DataManager.createProject();
+                setProject(newProj);
+                setMode('edit');
+            };
+
+            const handleSelectProject = (id) => {
+                const proj = DataManager.getProject(id);
+                if (proj) {
+                    setProject(proj);
+                    setMode('edit');
+                }
+            };
+
+            const handleDeleteProject = (id) => {
+                DataManager.deleteProject(id);
+                if (project && project.id === id) {
+                    setProject(null);
+                    setMode('dashboard');
+                }
+                setProjects(DataManager.getIndex());
+            };
+
+            const handleRenameProject = (id) => {
+                setRenameProjectId(id);
+                setShowRenameModal(true);
+            };
+
+            const handleExportData = () => {
+                const allData = {
+                    projects: DataManager.getIndex().map(p => DataManager.getProject(p.id))
+                };
+                const json = JSON.stringify(allData, null, 2);
+                const blob = new Blob([json], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'timestream_backup.json';
+                a.click();
+                URL.revokeObjectURL(url);
+                const now = Date.now();
+                localStorage.setItem(LAST_BACKUP_KEY, now);
+                setLastBackup(now);
+            };
+
+            const handleImportData = (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        try {
+                            const data = JSON.parse(e.target.result);
+                            if (data.projects) {
+                                data.projects.forEach(p => DataManager.saveProject(p));
+                                setProjects(DataManager.getIndex());
+                                alert('Data imported successfully!');
+                            } else {
+                                alert('Invalid backup file');
+                            }
+                        } catch (error) {
+                            alert('Invalid backup file');
+                        }
+                    };
+                    reader.readAsText(file);
+                }
+            };
+
+            const handleDeleteAllProjects = () => {
+                if (confirm("Are you sure you want to delete ALL projects? This cannot be undone.")) {
+                    const index = DataManager.getIndex();
+                    index.forEach(p => DataManager.deleteProject(p.id));
+                    setProjects([]);
+                    setProject(null);
+                    setMode('dashboard');
+                }
+            };
+
+            const handleCopySharedProject = () => {
+                if (!project) return;
+                const newProject = { ...project, id: generateId(), title: `${project.title} (Copy)` };
+                DataManager.saveProject(newProject);
+                setProject(newProject);
+                setIsSharedProject(false);
+                setMode('edit');
+            };
+
+            const goHome = () => {
+                setMode('dashboard');
+                setProject(null);
+                setIsSharedProject(false);
+                // Clear URL param if present
+                window.history.replaceState({}, document.title, window.location.pathname);
+                setProjects(DataManager.getIndex());
+            };
+
+            const ShareModal = ({ onCopy, onView }) => (
+                <div className="fixed inset-0 z-[100] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-8 relative overflow-hidden">
+                        <div className="flex justify-center mb-6">
+                            <div className="bg-brand-100 text-brand-600 w-16 h-16 rounded-2xl flex items-center justify-center text-3xl shadow-inner">
+                                <Icons.Share />
+                            </div>
+                        </div>
+                        <h2 className="text-2xl font-black text-center text-slate-900 mb-2">Shared Project</h2>
+                        <p className="text-center text-slate-500 mb-8">This project has been shared with you. You can view it or make your own editable copy.</p>
+                        <div className="flex gap-4">
+                            <button onClick={onView} className="btn btn-secondary flex-1 flex items-center justify-center gap-2">
+                                <Icons.Eye /> View Only
+                            </button>
+                            <button onClick={onCopy} className="btn btn-primary flex-1 flex items-center justify-center gap-2">
+                                <Icons.Copy /> Make a Copy
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            // If in dashboard, show minimal header
+            if (mode === 'dashboard') {
+                return (
+                    <div key="dashboard" className="min-h-screen flex flex-col bg-slate-50 animate-fade-in">
+                        {showWelcome && <WelcomeModal onClose={closeWelcome} />}
+                        {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
+                        {showRenameModal && (
+                            <RenameModal
+                                currentTitle={DataManager.getProject(renameProjectId)?.title}
+                                onRename={(newTitle) => {
+                                    const proj = DataManager.getProject(renameProjectId);
+                                    if (proj) {
+                                        proj.title = newTitle;
+                                        DataManager.saveProject(proj);
+                                        setProjects(DataManager.getIndex());
+                                        if (project && project.id === renameProjectId) {
+                                            setProject({...project, title: newTitle});
+                                        }
+                                    }
+                                    setShowRenameModal(false);
+                                }}
+                                onCancel={() => setShowRenameModal(false)}
+                            />
+                        )}
+                        <header className="bg-white border-b border-slate-200">
+                            <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
+                                <div className="flex items-center gap-3 cursor-pointer" onClick={goHome}>
+                                    <div className="bg-brand-500 text-white w-8 h-8 rounded-lg flex items-center justify-center font-black shadow-brand-200">
+                                        <Icons.Stream />
+                                    </div>
+                                    <h1 className="font-black text-xl tracking-tight text-slate-800">Timestream</h1>
+                                </div>
+                                <div className="flex gap-2">
+                                    <button onClick={() => setShowAbout(true)} className="btn btn-secondary flex items-center gap-2" aria-label="About Timestream">
+                                        <Icons.Question />
+                                    </button>
+                                    <button onClick={() => setMode('settings')} className="btn btn-secondary flex items-center gap-2 relative">
+                                        <Icons.Settings />
+                                        {daysSinceLastBackup > 7 && (
+                                            <div className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full border-2 border-white"></div>
+                                        )}
+                                    </button>
+                                </div>
+                            </div>
+                        </header>
+                        <Dashboard
+                            projects={projects}
+                            setMode={setMode}
+                            onSelectProject={handleSelectProject}
+                            onCreateProject={handleCreateProject}
+                            onDeleteProject={handleDeleteProject}
+                            onRenameProject={handleRenameProject}
+                            daysSinceLastBackup={daysSinceLastBackup}
+                            onExportData={handleExportData}
+                        />
+                    </div>
+                );
+            }
+                                
+            if (mode === 'settings') {
+                return (
+                    <div key="settings" className="min-h-screen flex flex-col bg-slate-50 animate-fade-in">
+                        <header className="bg-white border-b border-slate-200">
+                            <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
+                                <div className="flex items-center gap-3 cursor-pointer" onClick={goHome}>
+                                    <div className="bg-brand-500 text-white w-8 h-8 rounded-lg flex items-center justify-center font-black shadow-brand-200">
+                                        <Icons.Stream />
+                                    </div>
+                                    <h1 className="font-black text-xl tracking-tight text-slate-800">Timestream</h1>
+                                </div>
+                                <button onClick={() => setMode('dashboard')} className="btn btn-secondary flex items-center gap-2">
+                                    <Icons.Home /> Dashboard
+                                </button>
+                            </div>
+                        </header>
+                        <Settings
+                            onDeleteAllProjects={handleDeleteAllProjects}
+                            onExportData={handleExportData}
+                            onImportData={handleImportData}
+                            lastBackup={lastBackup}
+                        />
+                    </div>
+                );
+            }
+                                
+            return (
+                <div key={mode} className="min-h-screen flex flex-col animate-fade-in">
+                    {showSharedIntro && <SharedIntroModal onClose={() => setShowSharedIntro(false)} />}
+                    {showShareSuccess && <ShareSuccessModal url={shareUrl} onClose={() => setShowShareSuccess(false)} />}
+                    {showShareModal && (
+                        <ShareModal
+                            onView={() => {
+                                setMode('view');
+                                setShowShareModal(false);
+                            }}
+                            onCopy={() => {
+                                const newProject = { ...project, id: generateId(), title: `${project.title} (Copy)` };
+                                DataManager.saveProject(newProject);
+                                setProject(newProject);
+                                setMode('edit');
+                                setShowShareModal(false);
+                            }}
+                        />
+                    )}
+                    {showRenameModal && (
+                        <RenameModal
+                            currentTitle={DataManager.getProject(renameProjectId)?.title}
+                            onRename={(newTitle) => {
+                                const proj = DataManager.getProject(renameProjectId);
+                                if (proj) {
+                                    proj.title = newTitle;
+                                    DataManager.saveProject(proj);
+                                    setProjects(DataManager.getIndex());
+                                    if (project && project.id === renameProjectId) {
+                                        setProject({...project, title: newTitle});
+                                    }
+                                }
+                                setShowRenameModal(false);
+                            }}
+                            onCancel={() => setShowRenameModal(false)}
+                        />
+                    )}
+                    <Header
+                        mode={mode}
+                        setMode={setMode}
+                        onShare={handleShare}
+                        goHome={goHome}
+                        title={project ? project.title : ''}
+                        onRename={() => handleRenameProject(project.id)}
+                        saveStatus={saveStatus}
+                        isSharedProject={isSharedProject}
+                        onCopy={handleCopySharedProject}
+                    />
+                    <div className="flex-1 bg-slate-50 relative">
+                        {mode === 'edit' && project ? (
+                            <Editor project={project} setProject={setProject} />
+                        ) : (
+                            <>
+                                <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-2">
+                                    <div className="bg-white p-2 rounded-full shadow-lg border border-slate-200 flex flex-col gap-2">
+                                        <button
+                                            onClick={() => setLayoutMode('vertical')}
+                                            className={`w-10 h-10 rounded-full flex items-center justify-center transition ${layoutMode === 'vertical' ? 'bg-brand-600 text-white' : 'text-slate-400 hover:text-slate-800'}`}
+                                            title="Arrange Vertically"
+                                        >
+                                            <Icons.LayoutVertical />
+                                        </button>
+                                        <button
+                                            onClick={() => setLayoutMode('horizontal')}
+                                            className={`w-10 h-10 rounded-full flex items-center justify-center transition ${layoutMode === 'horizontal' ? 'bg-brand-600 text-white' : 'text-slate-400 hover:text-slate-800'}`}
+                                            title="Arrange Horizontally"
+                                        >
+                                            <Icons.LayoutHorizontal />
+                                        </button>
+                                        <div className="h-px bg-slate-200 w-full my-1"></div>
+                                        <button 
+                                            onClick={() => setDisplayMode('expanded')} 
+                                            className={`w-10 h-10 rounded-full flex items-center justify-center transition ${displayMode === 'expanded' ? 'bg-brand-600 text-white' : 'text-slate-400 hover:text-slate-800'}`}
+                                            title="Expanded View"
+                                        >
+                                            <Icons.Grid />
+                                        </button>
+                                        <button 
+                                            onClick={() => setDisplayMode('compact')} 
+                                            className={`w-10 h-10 rounded-full flex items-center justify-center transition ${displayMode === 'compact' ? 'bg-brand-600 text-white' : 'text-slate-400 hover:text-slate-800'}`}
+                                            title="Compact View"
+                                        >
+                                            <Icons.List />
+                                        </button>
+                                    </div>
+                                </div>
+                                {project && <TimelineView project={project} displayMode={displayMode} layoutMode={layoutMode} />}
+                            </>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
