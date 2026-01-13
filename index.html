@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Timestream</title>
+    <title>Flashback</title>
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
     
     <script src="https://cdn.tailwindcss.com/3.4.1"></script>
@@ -60,7 +60,7 @@
 
         // --- CONSTANTS & HELPERS ---
         const APP_VERSION = 2;
-        const APP_NAME = 'timestream';
+        const APP_NAME = 'flashback';
         const INDEX_KEY = `${APP_NAME}_index_v${APP_VERSION}`;
         const PROJECT_PREFIX = `${APP_NAME}_project_v${APP_VERSION}_`;
         const LAST_BACKUP_KEY = `${APP_NAME}_last_backup_v${APP_VERSION}`;
@@ -284,7 +284,7 @@
                             <Icons.Stream />
                         </div>
                     </div>
-                    <h2 className="text-2xl font-black text-center text-slate-900 mb-2">Welcome to Timestream</h2>
+                    <h2 className="text-2xl font-black text-center text-slate-900 mb-2">Welcome to Flashback</h2>
                     <p className="text-center text-slate-500 mb-8">The modern way to weave history into stories.</p>
 
                     <div className="space-y-4 mb-8">
@@ -323,7 +323,7 @@
                                 <div className="bg-brand-500 text-white w-8 h-8 rounded-lg flex items-center justify-center font-black shadow-brand-200">
                                     <Icons.Stream />
                                 </div>
-                                <h1 className="font-black text-xl tracking-tight text-slate-800 hidden sm:block">Timestream</h1>
+                                <h1 className="font-black text-xl tracking-tight text-slate-800 hidden sm:block">Flashback</h1>
                             </div>
                             {title && <span className="text-slate-300 mx-2 hidden sm:inline">|</span>}
                             <div className="flex items-center gap-2">
@@ -427,9 +427,9 @@
                         <Icons.Question />
                     </div>
                 </div>
-                <h2 className="text-2xl font-black text-center text-slate-900 mb-2">What is Timestream?</h2>
+                <h2 className="text-2xl font-black text-center text-slate-900 mb-2">What is Flashback?</h2>
                 <p className="text-center text-slate-600 mb-8 leading-relaxed">
-                    Timestream is a tool for weaving history into stories. It allows you to create beautiful, interactive timelines for historical events, stories, or project roadmaps.
+                    Flashback is a tool for weaving history into stories. It allows you to create beautiful, interactive timelines for historical events, stories, or project roadmaps.
                 </p>
 
                 <div className="space-y-4 mb-8">
@@ -1274,7 +1274,7 @@
             }, []);
 
             const closeWelcome = () => {
-                localStorage.setItem('timestream_welcome_seen', 'true');
+                localStorage.setItem('flashback_welcome_seen', 'true');
                 setShowWelcome(false);
             };
 
@@ -1343,7 +1343,7 @@
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = 'timestream_backup.json';
+                a.download = 'flashback_backup.json';
                 a.click();
                 URL.revokeObjectURL(url);
                 const now = Date.now();
@@ -1453,10 +1453,10 @@
                                     <div className="bg-brand-500 text-white w-8 h-8 rounded-lg flex items-center justify-center font-black shadow-brand-200">
                                         <Icons.Stream />
                                     </div>
-                                    <h1 className="font-black text-xl tracking-tight text-slate-800">Timestream</h1>
+                                    <h1 className="font-black text-xl tracking-tight text-slate-800">Flashback</h1>
                                 </div>
                                 <div className="flex gap-2">
-                                    <button onClick={() => setShowAbout(true)} className="btn btn-secondary flex items-center gap-2" aria-label="About Timestream">
+                                    <button onClick={() => setShowAbout(true)} className="btn btn-secondary flex items-center gap-2" aria-label="About Flashback">
                                         <Icons.Question />
                                     </button>
                                     <button onClick={() => setMode('settings')} className="btn btn-secondary flex items-center gap-2 relative">
@@ -1491,7 +1491,7 @@
                                     <div className="bg-brand-500 text-white w-8 h-8 rounded-lg flex items-center justify-center font-black shadow-brand-200">
                                         <Icons.Stream />
                                     </div>
-                                    <h1 className="font-black text-xl tracking-tight text-slate-800">Timestream</h1>
+                                    <h1 className="font-black text-xl tracking-tight text-slate-800">Flashback</h1>
                                 </div>
                                 <button onClick={() => setMode('dashboard')} className="btn btn-secondary flex items-center gap-2">
                                     <Icons.Home /> Dashboard
