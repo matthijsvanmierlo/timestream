@@ -702,40 +702,56 @@
                                 <div className="flex gap-16 relative z-10">
                                     {sortedEvents.map((evt, idx) => {
                                         const isTop = idx % 2 === 0;
+                                        const cardContent = (
+                                            <div
+                                                role="button"
+                                                tabIndex={0}
+                                                onClick={() => setSelectedEvent(evt)}
+                                                onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && setSelectedEvent(evt)}
+                                                aria-label={`View details for ${evt.title}`}
+                                                className={`w-full bg-white border border-slate-100 rounded-2xl p-5 shadow-sm hover:shadow-xl transition-all duration-300 hover:scale-105 cursor-pointer ${displayMode === 'compact' ? 'py-3' : ''} ${isTop ? 'mb-2' : 'mt-2'}`}
+                                            >
+                                                 <div className="flex items-baseline justify-between mb-2">
+                                                    <span className={`font-black ${themeColor.text} text-xs uppercase tracking-widest`}>
+                                                        {evt.displayDate || evt.date}
+                                                    </span>
+                                                 </div>
+                                                 <h3 className={`text-lg font-bold text-slate-800 mb-2 ${themeFont} leading-tight line-clamp-2`}>{evt.title}</h3>
+                                                 {displayMode === 'expanded' && evt.imageUrl && (
+                                                     <div className="mb-3 rounded-lg overflow-hidden bg-slate-50 border border-slate-100 aspect-video">
+                                                         <img src={evt.imageUrl} alt={evt.title} className="w-full h-full object-cover" loading="lazy" />
+                                                     </div>
+                                                 )}
+                                                 {displayMode === 'expanded' && (
+                                                    <p className="text-slate-600 text-xs line-clamp-3">{evt.description}</p>
+                                                 )}
+                                            </div>
+                                        );
+
                                         return (
                                             <div
                                                 key={evt.id}
-                                                className={`w-80 flex flex-col items-center flex-shrink-0 group ${isTop ? 'flex-col-reverse -mb-24 translate-y-12' : 'mt-0 -translate-y-12'}`}
+                                                className="w-80 relative flex-shrink-0 h-0 group"
                                             >
                                                  {/* Dot */}
-                                                <div className={`w-4 h-4 bg-white border-4 ${themeColor.bubble} rounded-full shadow-sm z-20`}></div>
+                                                <div className={`absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-4 h-4 bg-white border-4 ${themeColor.bubble} rounded-full shadow-sm z-20`}></div>
 
-                                                {/* Connector */}
-                                                <div className={`w-px h-12 bg-slate-200 ${isTop ? 'mb-2' : 'mt-2'}`}></div>
+                                                {/* Content Wrapper */}
+                                                <div className={`absolute left-0 right-0 flex flex-col items-center ${isTop ? 'bottom-0 mb-2 justify-end' : 'top-0 mt-2 justify-start'}`}>
 
-                                                {/* Card */}
-                                                <div
-                                                    role="button"
-                                                    tabIndex={0}
-                                                    onClick={() => setSelectedEvent(evt)}
-                                                    onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && setSelectedEvent(evt)}
-                                                    aria-label={`View details for ${evt.title}`}
-                                                    className={`w-full bg-white border border-slate-100 rounded-2xl p-5 shadow-sm hover:shadow-xl transition-all duration-300 hover:scale-105 cursor-pointer ${displayMode === 'compact' ? 'py-3' : ''}`}
-                                                >
-                                                     <div className="flex items-baseline justify-between mb-2">
-                                                        <span className={`font-black ${themeColor.text} text-xs uppercase tracking-widest`}>
-                                                            {evt.displayDate || evt.date}
-                                                        </span>
-                                                     </div>
-                                                     <h3 className={`text-lg font-bold text-slate-800 mb-2 ${themeFont} leading-tight line-clamp-2`}>{evt.title}</h3>
-                                                     {displayMode === 'expanded' && evt.imageUrl && (
-                                                         <div className="mb-3 rounded-lg overflow-hidden bg-slate-50 border border-slate-100 aspect-video">
-                                                             <img src={evt.imageUrl} alt={evt.title} className="w-full h-full object-cover" loading="lazy" />
-                                                         </div>
-                                                     )}
-                                                     {displayMode === 'expanded' && (
-                                                        <p className="text-slate-600 text-xs line-clamp-3">{evt.description}</p>
-                                                     )}
+                                                    {isTop ? (
+                                                        <>
+                                                            {cardContent}
+                                                            {/* Connector */}
+                                                            <div className="w-px h-12 bg-slate-200"></div>
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            {/* Connector */}
+                                                            <div className="w-px h-12 bg-slate-200"></div>
+                                                            {cardContent}
+                                                        </>
+                                                    )}
                                                 </div>
                                             </div>
                                         )
@@ -1276,7 +1292,7 @@
                 if (!project) return;
                 const json = JSON.stringify(project);
                 const compressed = LZString.compressToEncodedURIComponent(json);
-                const url = `https://matthijsvanmierlo.github.io/timestream?t=${compressed}`;
+                const url = `https://matthijsvanmierlo.github.io/flashback?t=${compressed}`;
                 
                 navigator.clipboard.writeText(url)
                     .then(() => {
