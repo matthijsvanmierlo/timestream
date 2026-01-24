@@ -1137,8 +1137,8 @@
                                 </div>
                             ) : (
                                 <>
-                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                                        <div>
+                                    <div className="flex flex-wrap gap-4">
+                                        <div className="flex-1 min-w-[280px]">
                                             <label className="block text-sm font-bold text-slate-400 mb-1 uppercase">Sorting Date</label>
                                             <input
                                                 type="date"
@@ -1147,7 +1147,7 @@
                                                 className="input-field font-mono"
                                             />
                                         </div>
-                                        <div>
+                                        <div className="flex-1 min-w-[280px]">
                                             <label className="block text-sm font-bold text-slate-400 mb-1 uppercase">Display Date (Optional)</label>
                                             <input
                                                 type="text"
